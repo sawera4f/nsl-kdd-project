@@ -1,93 +1,69 @@
 import streamlit as st
 import pickle
-import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 
-st.title("🔍 Détection d’attaques réseau (NSL-KDD)")
-st.write("Interface simple permettant de visualiser les performances du modèle et comprendre les résultats.")
+st.title("🔍 Détection d’attaques réseau – NSL-KDD")
+st.write("Interface interactive simplifiée basée sur un modèle réduit (7 features).")
 
 # -----------------------------------------------------
-# Charger le modèle
+# Charger le modèle réduit + encoders
 # -----------------------------------------------------
 try:
-    model = pickle.load(open("models/logreg_model.pkl", "rb"))
-    st.success("Modèle chargé avec succès.")
-except:
-    st.error("Erreur : fichier models/logreg_model.pkl introuvable.")
+    model = pickle.load(open("models/logreg_small.pkl", "rb"))
+    encoders = pickle.load(open("models/encoders.pkl", "rb"))
+    st.success("Modèle et encoders chargés.")
+except Exception as e:
+    st.error(f"Erreur chargement modèle : {e}")
     st.stop()
 
 # -----------------------------------------------------
-# Explication simple
+# 📝 Zone interactive
 # -----------------------------------------------------
-st.header("🧠 C’est quoi une attaque ?")
-st.write("""
-Chaque connexion réseau peut être :
-- **Normale** → pas de danger  
-- **Attaque** → tentative de piratage, scan, déni de service (DoS), etc.
+st.header("📝 Tester une connexion")
 
-Le modèle apprend à différencier **normal** vs **attaque** à partir de 41 caractéristiques du dataset NSL-KDD.
-""")
+# Les noms EXACTS des colonnes de ton dataset :
+# "0" = duration
+# "491" = src_bytes
+# "0.1" = dst_bytes
+# "0.20" = count
+# "tcp" = protocole
+# "ftp_data" = service
+# "SF" = flag
 
-# -----------------------------------------------------
-# Affichage des performances
-# -----------------------------------------------------
-st.header("📊 Performances du modèle")
+duration = st.number_input("Durée (colonne '0')", min_value=0.0)
+src_bytes = st.number_input("Bytes envoyés (colonne '491')", min_value=0.0)
+dst_bytes = st.number_input("Bytes reçus (colonne '0.1')", min_value=0.0)
+count = st.number_input("Count (colonne '0.20')", min_value=0)
 
-st.write("""
-Voici les performances obtenues pendant l'évaluation du modèle sur les données test.
-Ces mesures permettent de comprendre à quel point le modèle détecte correctement les attaques.
-""")
-
-# Valeurs d'exemple (tirées de ton main.py)
-accuracy = 0.95
-precision = 0.96
-recall = 0.94
-f1 = 0.95
-
-st.metric("Accuracy", f"{accuracy*100:.2f}%")
-st.metric("Precision", f"{precision*100:.2f}%")
-st.metric("Recall", f"{recall*100:.2f}%")
-st.metric("F1-score", f"{f1*100:.2f}%")
+protocol = st.selectbox("Protocole (colonne 'tcp')", sorted(encoders["tcp"].classes_))
+service = st.selectbox("Service (colonne 'ftp_data')", sorted(encoders["ftp_data"].classes_))
+flag = st.selectbox("Flag (colonne 'SF')", sorted(encoders["SF"].classes_))
 
 # -----------------------------------------------------
-# Matrice de confusion
+# Prédiction
 # -----------------------------------------------------
-st.header("🧩 Matrice de confusion")
+if st.button("🔍 Prédire"):
+    try:
+        proto_enc = encoders["tcp"].transform([protocol])[0]
+        service_enc = encoders["ftp_data"].transform([service])[0]
+        flag_enc = encoders["SF"].transform([flag])[0]
 
-try:
-    # Exemple de matrice (tu peux charger celle générée)
-    cm = np.array([[16183, 591], [864, 13856]])
+        X = np.array([[
+            duration,      # "0"
+            proto_enc,     # "tcp"
+            service_enc,   # "ftp_data"
+            flag_enc,      # "SF"
+            src_bytes,     # "491"
+            dst_bytes,     # "0.1"
+            count          # "0.20"
+        ]])
 
-    fig, ax = plt.subplots()
-    sns.heatmap(cm, annot=True, cmap="Blues", fmt='d',
-                xticklabels=["Normal", "Attack"],
-                yticklabels=["Normal", "Attack"])
-    plt.xlabel("Prédiction")
-    plt.ylabel("Réel")
-    st.pyplot(fig)
+        pred = model.predict(X)[0]
 
-except:
-    st.warning("Impossible d'afficher la matrice de confusion.")
+        if pred == 1:
+            st.error("⚠️ Résultat : **ATTAQUE**")
+        else:
+            st.success("✔️ Résultat : **NORMAL**")
 
-# -----------------------------------------------------
-# Liste des features (explication simplifiée)
-# -----------------------------------------------------
-st.header("📘 Comprendre les caractéristiques (features)")
-
-st.write("""
-Le modèle utilise **41 informations** à propos de chaque connexion, par exemple :
-
-- `duration` → durée de la connexion  
-- `protocol_type` → protocole utilisé (TCP, UDP, ICMP)  
-- `service` → type de service (http, ftp, smtp…)  
-- `src_bytes` → bytes envoyés par la source  
-- `dst_bytes` → bytes reçus  
-- `count` → nombre de connexions similaires  
-- `srv_count` → nombre de connexions vers le même service  
-- etc.
-
-L’utilisateur **n’a pas besoin de connaître tout ça** pour comprendre si une attaque est détectée.
-""")
-
-st.success("Interface minimaliste prête ✨")
+    except Exception as e:
+        st.error(f"Erreur : {e}")
